@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bootstrap demo</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" sizes="180x180" href="favicon/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon/favicon-16x16.png">
+    <link rel="manifest" href="favicon/site.webmanifest">
+    <link rel="mask-icon" href="favicon/safari-pinned-tab.svg" color="#4f4f4f">
+    <meta name="apple-mobile-web-app-title" content="Beer">
+    <meta name="application-name" content="Beer">
+    <meta name="msapplication-TileColor" content="#b91d47">
+    <meta name="theme-color" content="#000000">
+
+
+  </head>
+  <body>
+    <script>
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/workers.js')
+          .then(registration => {
+            console.log('Service Worker enregistré avec succès.', registration);
+          })
+          .catch(error => {
+            console.log("Erreur lors de l'enregistrement du Service Worker.", error);
+          });
+    }
+      
+    function openDatabase() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open('BeerDatabase', 1);
+
+            request.onupgradeneeded = function (event) {
+                const db = event.target.result;
+                const objectStore = db.createObjectStore('beers', { keyPath: 'id' });
+                objectStore.createIndex('name', 'name', { unique: false });
+                objectStore.createIndex("tagline", "tagline", { unique: false });
+                objectStore.createIndex("first_brewed", "first_brewed", { unique: false });
+                objectStore.createIndex("description", "description", { unique: false });
+                objectStore.createIndex("image_url", "image_url", { unique: false });
+            };
+
+            request.onsuccess = function (event) {
+                const db = event.target.result;
+                resolve(db);
+            };
+
+            request.onerror = function (event) {
+                reject(event.target.error);
+            };
+        });
+    }
+
+    function addBeerToDatabase(db, beer) {
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(['beers'], 'readwrite');
+            const objectStore = transaction.objectStore('beers');
+
+            const request = objectStore.add(beer);
+
+            request.onsuccess = function () {
+                resolve();
+            };
+
+            request.onerror = function (event) {
+                reject(event.target.error);
+            };
+        });
+    }
+
+    function deleteBeerFromDatabase(db, beerId) {
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(['beers'], 'readwrite');
+            const objectStore = transaction.objectStore('beers');
+            const request = objectStore.delete(beerId);
+
+            request.onsuccess = function () {
+                resolve();
+            };
+
+            request.onerror = function (event) {
+                reject(event.target.error);
+            };
+        });
+    }
+
+    function getAllBeersFromDatabase(db) {
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(['beers'], 'readonly');
+            const objectStore = transaction.objectStore('beers');
+            const request = objectStore.getAll();
+
+            request.onsuccess = function () {
+                resolve(request.result);
+            };
+
+            request.onerror = function (event) {
+                reject(event.target.error);
+            };
+        });
+    }
+
+    function getBeersFromAPI() {
+        return fetch('https://api.punkapi.com/v2/beers')
+            .then(response => response.json());
+    }
+
+  
+    async function fetchDataAndStoreInDatabase() {
+        try {
+            const db = await openDatabase();
+
+            const beersFromAPI = await getBeersFromAPI();
+
+            for (const beer of beersFromAPI) {
+                await addBeerToDatabase(db, beer);
+            }
+
+            const allBeersFromDatabase = await getAllBeersFromDatabase(db);
+
+            console.log('Toutes les bières dans la base de données :', allBeersFromDatabase);
+        } catch (error) {
+            console.error('Une erreur s\'est produite :', error);
+        }
+    }
+
+    async function displayAllBeers() {
+        try {
+            const db = await openDatabase();
+            const allBeersFromDatabase = await getAllBeersFromDatabase(db);
+            displayBeers(allBeersFromDatabase);
+        } catch (error) {
+            console.error('Une erreur s\'est produite :', error);
+        }
+    }
+
+    function displayBeers(beers) {
+        let html = '';
+        beers.forEach(beer => {
+            let htmlSegment = `
+                <div class="card" style="width: 18rem;">
+                    <img class="card-img-top" src="${beer.image_url}" alt="Card image cap">
+                    <div class="card-body">
+                        <h5 class="card-title">${beer.name}</h5>
+                        <p class="card-text">${beer.description}</p>
+                        <button onclick="deleteBeerAndRefresh(${beer.id})">Supprimer</button>
+                    </div>
+                </div>
+            `;
+            html += htmlSegment;
+        });
+
+        // Ajout du formulaire pour ajouter une bière
+        html += `
+            <div>
+                <h3>Ajouter une nouvelle bière</h3>
+                <form onsubmit="event.preventDefault(); addBeerAndRefresh({id: Date.now(), name: document.getElementById('beerName').value, description: document.getElementById('beerDescription').value, image_url: document.getElementById('beerImageURL').value})">
+                    <label for="beerName">Nom de la bière:</label>
+                    <input type="text" id="beerName" required>
+                    <label for="beerDescription">Description de la bière:</label>
+                    <input type="text" id="beerDescription" required>
+                    <label for="beerImageURL">URL de l'image de la bière:</label>
+                    <input type="text" id="beerImageURL" required>
+                    <button type="submit">Ajouter</button>
+                </form>
+            </div>
+        `;
+
+        let container = document.querySelector('.container');
+        container.innerHTML = html;
+    }
+
+    async function addBeerAndRefresh(beer) {
+        try {
+            const db = await openDatabase();
+            await addBeerToDatabase(db, beer);
+            await displayAllBeers();
+        } catch (error) {
+            console.error('Une erreur s\'est produite :', error);
+        }
+    }
+
+    async function deleteBeerAndRefresh(beerId) {
+        try {
+            const db = await openDatabase();
+            await deleteBeerFromDatabase(db, beerId);
+            await displayAllBeers();
+        } catch (error) {
+            console.error('Une erreur s\'est produite :', error);
+        }
+    }
+
+    /*async function filterBeersAndDisplay(searchTerm) {
+        try {
+          const db = await openDatabase();
+          const allBeersFromDatabase = await getAllBeersFromDatabase(db);
+
+          // Filter beers based on the search term
+          const filteredBeers = allBeersFromDatabase.filter(beer =>
+            beer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            beer.tagline.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            beer.description.toLowerCase().includes(searchTerm.toLowerCase())
+          );
+
+          displayBeers(filteredBeers);
+        } catch (error) {
+          console.error('Une erreur s\'est produite :', error);
+        }
+      }
+
+      function handleSearchInputChange() {
+        const searchInput = document.getElementById('searchInput');
+        const searchTerm = searchInput.value;
+        filterBeersAndDisplay(searchTerm);
+      }
+
+      function setupSearchInput() {
+        const searchInput = document.getElementById('searchInput');
+        searchInput.addEventListener('input', handleSearchInputChange);
+      }*/
+
+      // Appel initial pour afficher toutes les bières
+      displayAllBeers();
+      //setupSearchInput();
+
+    </script>
+
+    <style>
+      .card-img-top {
+        height: 650px;
+        width: auto;
+      }
+    </style>
+    <h3>Rechercher des bières</h3>
+    <input type="text" id="searchInput" placeholder="Nom, tagline, description...">
+    <div class="container">
+    </div>
+  </body>
+</html>
